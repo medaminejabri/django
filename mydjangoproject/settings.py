@@ -113,13 +113,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 ## CELERY SETTINGS
 # ------------------------------------------------------------------------------
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL")
-CELERY_RESULT_BACKEND = None
+CELERY_RESULT_BACKEND = 'rpc://'
 BROKER_POOL_LIMIT = 1
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_CREATE_MISSING_QUEUES = True
 CELERY_TIMEZONE = 'UTC'
+
 
 DATABASES = {
     'default': {

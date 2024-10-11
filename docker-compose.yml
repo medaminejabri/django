@@ -23,15 +23,44 @@ services:
       - web
     ports: []
 
-  flower:
-    image: mher/flower:2.0.1
+  leek:
+    image: kodhive/leek:0.6.9 # Assurez-vous que l'image Leek existe
+    ports:
+      - "5000:5000"
+      - "8081:8081" # Port pour accéder à l'interface de Leek
     environment:
-      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
-      - FLOWER_PORT=5555
+      # General
+      - LEEK_API_LOG_LEVEL=INFO
+      - LEEK_AGENT_LOG_LEVEL=INFO
+      # Components
+      - LEEK_ENABLE_API=true
+      - LEEK_ENABLE_AGENT=true
+      - LEEK_ENABLE_WEB=true
+      # URLs
+      - LEEK_API_URL=http://0.0.0.0:5000
+      - LEEK_WEB_URL=http://0.0.0.0:8081
+      # Authentication
+      - LEEK_API_ENABLE_AUTH=false
+      # Subscriptions
+      - |
+        LEEK_AGENT_SUBSCRIPTIONS=
+        [
+          {
+            "broker": "amqp://guest:guest@rabbitmq:5672//",
+            "backend": null,
+            "exchange": "celeryev",
+            "queue": "leek.fanout",
+            "routing_key": "#",
+            "org_name": "mono",
+            "app_name": "leek",
+            "app_env": "prod",
+            "prefetch_count": 1000,
+            "concurrency_pool_size": 2
+          }
+        ]
+      - LEEK_AGENT_API_SECRET=not-secret
     depends_on:
       - rabbitmq
-    ports:
-      - "5555:5555"
 
   rabbitmq:
     image: rabbitmq:3-management
