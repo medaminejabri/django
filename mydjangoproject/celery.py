@@ -1,17 +1,18 @@
-import os
 from celery import Celery
 
-# Set the default Django settings module
+# Set the default Django settings module for the 'celery' program.
+import os
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'mydjangoproject.settings')
 
 app = Celery('mydjangoproject')
 
-# Load task modules from all registered Django app configs
+# Using a string here means the worker doesn't have to serialize
+# the configuration object to child processes.
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
-# Auto-discover tasks from registered Django apps
+# Autodiscover tasks from installed apps
 app.autodiscover_tasks()
 
-# Make sure to include the broker URL again if you need to
-app.conf.broker_url = 'amqp://guest:guest@rabbitmq:5672// '
-app.conf.result_backend = 'rpc://'
+@app.task(bind=True)
+def debug_task(self):
+    print(f'Request: {self.request!r}')

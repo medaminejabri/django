@@ -6,16 +6,21 @@ services:
     volumes:
       - .:/app
     ports:
-      - "8000:8000"
+      - "8000:8000"  # Expose port 8002 for Django app
     env_file:
       - docker-compose.env
     command: >
-      sh -c "python manage.py runserver 0.0.0.0:8000"
+      sh -c "sleep 5 && python manage.py runserver 0.0.0.0:8000 --noreload"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   celery:
     <<: *web
     command: >
-      sh -c "celery -A mydjangoproject worker --loglevel=info"
+      sh -c "celery -A mydjangoproject worker -B -E --loglevel=info --without-mingle --without-gossip --heartbeat-interval 15"
     env_file:
       - docker-compose.env
     depends_on:
@@ -23,53 +28,20 @@ services:
       - web
     ports: []
 
-  leek:
-    image: kodhive/leek:0.6.9 # Assurez-vous que l'image Leek existe
-    ports:
-      - "5000:5000"
-      - "8081:8081" # Port pour accéder à l'interface de Leek
-    environment:
-      # General
-      - LEEK_API_LOG_LEVEL=INFO
-      - LEEK_AGENT_LOG_LEVEL=INFO
-      # Components
-      - LEEK_ENABLE_API=true
-      - LEEK_ENABLE_AGENT=true
-      - LEEK_ENABLE_WEB=true
-      # URLs
-      - LEEK_API_URL=http://0.0.0.0:5000
-      - LEEK_WEB_URL=http://0.0.0.0:8081
-      # Authentication
-      - LEEK_API_ENABLE_AUTH=false
-      # Subscriptions
-      - |
-        LEEK_AGENT_SUBSCRIPTIONS=
-        [
-          {
-            "broker": "amqp://guest:guest@rabbitmq:5672//",
-            "backend": null,
-            "exchange": "celeryev",
-            "queue": "leek.fanout",
-            "routing_key": "#",
-            "org_name": "mono",
-            "app_name": "leek",
-            "app_env": "prod",
-            "prefetch_count": 1000,
-            "concurrency_pool_size": 2
-          }
-        ]
-      - LEEK_AGENT_API_SECRET=not-secret
-    depends_on:
-      - rabbitmq
-
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5677:5672"    # RabbitMQ default port
-      - "15672:15672"  # RabbitMQ management UI
+      - "5678:5672"    # RabbitMQ default port for messaging
+      - "15672:15672"  # RabbitMQ management UI port
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      retries: 3
+      start_period: 5s
+      timeout: 10s
 
   migration:
     build: .
@@ -82,16 +54,29 @@ services:
 
   db:
     image: postgres:15
-    tmpfs:
-      - /var/lib/postgresql/data
     environment:
       - POSTGRES_PASSWORD=jabri
       - POSTGRES_USER=mohamed
-      - POSTGRES_DB=db2
+      - POSTGRES_DB=db
     ports:
-      - "5444:5432"
+      - "5433:5432"  # Change the exposed Postgres port to 5433
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mohamed -d db2"]
+      test: ["CMD-SHELL", "pg_isready -U mohamed -d db"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  flower:
+    image: mher/flower
+    ports:
+      - "5555:5555"  # Flower interface for Celery monitoring
+    environment:
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=rpc://
+      - FLOWER_BROKER_API=http://rabbitmq:15672/api/
+      - FLOWER_ADDRESS=0.0.0.0
+      - FLOWER_PORT=5555
+      - FLOWER_BASIC_AUTH=admin:password
+    depends_on:
+      - rabbitmq
+    restart: on-failure

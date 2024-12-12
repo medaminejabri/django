@@ -12,6 +12,9 @@ COPY Pipfile Pipfile.lock ./
 RUN pip install pipenv
 # Install dependencies
 RUN pipenv install --system --deploy --dev --verbose
+# Add to your Dockerfile
+RUN apt-get update && apt-get install -y postgresql-client
+
 # Copy the rest of the project files
 ADD . ./
 # Expose the port the app runs on
