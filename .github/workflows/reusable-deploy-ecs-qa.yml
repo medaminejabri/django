@@ -92,7 +92,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          docker buildx build -f Dockerfile --cache-from "type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:qa" --output "type=image,name=$ECR_REGISTRY/$ECR_REPOSITORY:latest,push=true" .
+          docker buildx build -f Dockerfile --cache-from "type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:qa" --output "type=image,name=$ECR_REGISTRY/$ECR_REPOSITORY:qa,push=true" .
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:qa" >> $GITHUB_OUTPUT
 
   db-migration:
