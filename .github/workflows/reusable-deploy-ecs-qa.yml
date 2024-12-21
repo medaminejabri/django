@@ -1,0 +1,26 @@
+name: Deploy to QA
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-ecs:
+    uses: medaminejabri/django/.github/workflows/reusable-deploy-ecs-qa.yaml@main
+    with:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: qa-djapp-useast1-ecr-repo
+      ECS_API_SERVICE: qa-djapp-useast1-api-service
+      ECS_WORKER_SERVICE: qa-djapp-useast1-worker-service
+      ECS_CLUSTER: qa-djapp-useast1-ecs-cluster
+      ECS_API_TASK_DEFINITION: qa-djapp-useast1-api-service
+      ECS_WORKER_TASK_DEFINITION: qa-djapp-useast1-worker-service
+      ECS_MIGRATION_TASK_DEFINITION: qa-djapp-useast1-migrate-service
+      MIGRATION_TASK_DEFINITION_FAMILY: qa-djapp-useast1-migrate-service
+      MIGRATE_CW_LOG_GROUP: /aws/ecs/qa-djapp-useast1-migrate-service
+      MIGRATE_SG_NAME: qa-djapp-useast1-api-service-sg
+      VPC_NAME: qa-djapp-useast1-vpc
+    secrets:
+      ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
