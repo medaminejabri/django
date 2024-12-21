@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy-ecs:
-    uses: medaminejabri/django/.github/workflows/reusable-deploy-ecs-qa.yaml@main
+    uses: medaminejabri/django/.github/workflows/reusable-deploy-ecs-qa.yml@main
     with:
       AWS_REGION: us-east-1
       ECR_REPOSITORY: qa-djapp-useast1-ecr-repo
