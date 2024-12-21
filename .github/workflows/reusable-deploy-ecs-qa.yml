@@ -1,26 +1,195 @@
-name: Deploy to QA
+name: Deploy to Amazon ECS
 
 on:
-  push:
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      AWS_REGION:
+        required: true
+        type: string
+      ECR_REPOSITORY:
+        required: true
+        type: string
+      ECS_API_SERVICE:
+        required: true
+        type: string
+      ECS_WORKER_SERVICE:
+        required: true
+        type: string
+      ECS_CLUSTER:
+        required: true
+        type: string
+      ECS_API_TASK_DEFINITION:
+        required: true
+        type: string
+      ECS_WORKER_TASK_DEFINITION:
+        required: true
+        type: string
+      ECS_MIGRATION_TASK_DEFINITION:
+        required: true
+        type: string
+      MIGRATION_TASK_DEFINITION_FAMILY:
+        required: true
+        type: string
+      MIGRATE_CW_LOG_GROUP:
+        required: true
+        type: string
+      MIGRATE_SG_NAME:
+        required: true
+        type: string
+      VPC_NAME:
+        required: true
+        type: string
+    secrets:
+      ACCESS_KEY_ID:
+        required: true
+      SECRET_ACCESS_KEY:
+        required: true
+
+env:
+  AWS_REGION: ${{ inputs.AWS_REGION }}
+  ECR_REPOSITORY: ${{ inputs.ECR_REPOSITORY }}
+  ECS_API_SERVICE: ${{ inputs.ECS_API_SERVICE }}
+  ECS_WORKER_SERVICE: ${{ inputs.ECS_WORKER_SERVICE }}
+  ECS_CLUSTER: ${{ inputs.ECS_CLUSTER }}
+  ECS_API_TASK_DEFINITION: ${{ inputs.ECS_API_TASK_DEFINITION }}
+  ECS_WORKER_TASK_DEFINITION: ${{ inputs.ECS_WORKER_TASK_DEFINITION }}
+  ECS_MIGRATION_TASK_DEFINITION: ${{ inputs.ECS_MIGRATION_TASK_DEFINITION }}
+  MIGRATION_TASK_DEFINITION_FAMILY: ${{ inputs.MIGRATION_TASK_DEFINITION_FAMILY }}
+  MIGRATE_CW_LOG_GROUP: ${{ inputs.MIGRATE_CW_LOG_GROUP }}
+  MIGRATE_SG_NAME: ${{ inputs.MIGRATE_SG_NAME }}
+  VPC_NAME: ${{ inputs.VPC_NAME }}
 
 jobs:
-  deploy-ecs:
-    uses: medaminejabri/django/.github/workflows/reusable-deploy-ecs-qa.yml@main
-    with:
-      AWS_REGION: us-east-1
-      ECR_REPOSITORY: qa-djapp-useast1-ecr-repo
-      ECS_API_SERVICE: qa-djapp-useast1-api-service
-      ECS_WORKER_SERVICE: qa-djapp-useast1-worker-service
-      ECS_CLUSTER: qa-djapp-useast1-ecs-cluster
-      ECS_API_TASK_DEFINITION: qa-djapp-useast1-api-service
-      ECS_WORKER_TASK_DEFINITION: qa-djapp-useast1-worker-service
-      ECS_MIGRATION_TASK_DEFINITION: qa-djapp-useast1-migrate-service
-      MIGRATION_TASK_DEFINITION_FAMILY: qa-djapp-useast1-migrate-service
-      MIGRATE_CW_LOG_GROUP: /aws/ecs/qa-djapp-useast1-migrate-service
-      MIGRATE_SG_NAME: qa-djapp-useast1-api-service-sg
-      VPC_NAME: qa-djapp-useast1-vpc
-    secrets:
-      ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  build-push-ecr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.0.0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2.10.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3.0.1
+        with:
+          aws-access-key-id: ${{ secrets.ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1.7.0
+        with:
+          mask-password: true
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker buildx build -f Dockerfile --cache-from "type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:qa" --output "type=image,name=$ECR_REGISTRY/$ECR_REPOSITORY:latest,push=true" .
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:qa" >> $GITHUB_OUTPUT
+
+  db-migration:
+    needs: build-push-ecr
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.0.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3.0.1
+        with:
+          aws-access-key-id: ${{ secrets.ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Latest Migration Task Defintion
+        run: |
+          aws ecs describe-task-definition --task-definition $MIGRATION_TASK_DEFINITION_FAMILY --query taskDefinition > migrate-task-definition.json
+
+      - name: Deploy MIGRATION task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1.4.11
+        with:
+          task-definition: migrate-task-definition.json
+          cluster: ${{ env.ECS_CLUSTER }}
+
+      - name: Run Database Migration
+        run: |
+          vpc_id=$(aws ec2 describe-vpcs --filter Name=tag:Name,Values=$VPC_NAME --query Vpcs[].VpcId --output text)
+          prv_subnets=$(aws ec2 describe-subnets --filter Name=vpc-id,Values=$vpc_id --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId')
+          migrate_sg=$(aws ec2 describe-security-groups --region $AWS_REGION --filter Name=vpc-id,Values=$vpc_id Name=group-name,Values=$MIGRATE_SG_NAME --query 'SecurityGroups[*].[GroupId]' --output text)
+          run_result=$(aws ecs run-task --cluster $ECS_CLUSTER --launch-type FARGATE --platform-version LATEST --count 1 --task-definition $MIGRATION_TASK_DEFINITION_FAMILY --network-configuration "awsvpcConfiguration={subnets=$prv_subnets,securityGroups=[$migrate_sg],assignPublicIp=DISABLED}")
+          container_arn=$(echo $run_result | jq '.tasks[0].taskArn' | sed -e 's/^"//' -e 's/"$//')
+          aws ecs wait tasks-stopped --cluster $ECS_CLUSTER --tasks "${container_arn}"
+          describe_result=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks "${container_arn}")
+          terminated_status=$(echo $describe_result | jq '.tasks[0].containers[0].exitCode')
+          echo "Tail logs from latest log stream"
+          LOG_STREAM=$(aws logs describe-log-streams --log-group-name $MIGRATE_CW_LOG_GROUP --max-items 1 --order-by LastEventTime --descending --query logStreams[].logStreamName --output text | head -n 1)
+          aws logs get-log-events --log-group-name $MIGRATE_CW_LOG_GROUP --log-stream-name $LOG_STREAM --query events[].message --output text --color on
+          echo "Status"
+          echo $terminated_status
+          exit $terminated_status
+
+  deploy-api:
+    needs: db-migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.0.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3.0.1
+        with:
+          aws-access-key-id: ${{ secrets.ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Latest API task definition
+        run: |
+          aws ecs describe-task-definition --task-definition $ECS_API_TASK_DEFINITION --query taskDefinition > api-task-definition.json
+
+      - name: Deploy API ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1.4.11
+        with:
+          task-definition: api-task-definition.json
+          service: ${{ env.ECS_API_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+  deploy-worker:
+    needs: db-migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.0.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3.0.1
+        with:
+          aws-access-key-id: ${{ secrets.ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Latest Worker task definition
+        run: |
+          aws ecs describe-task-definition --task-definition $ECS_WORKER_TASK_DEFINITION --query taskDefinition > worker-task-definition.json
+
+      - name: Deploy Worker task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1.4.11
+        with:
+          task-definition: worker-task-definition.json
+          service: ${{ env.ECS_WORKER_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
