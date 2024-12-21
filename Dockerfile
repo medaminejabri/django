@@ -4,13 +4,31 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 # Set the working directory
 WORKDIR /app
+RUN set -ex \
+  && apt-get update \
+  && apt-get install -qq -y --no-install-recommends \
+  sudo \
+  make \
+  curl \
+  gcc \
+  unzip \
+  git \
+  jq \
+  openssh-client \
+  gettext \
+  procps \
+  python-gdal \
+  python3-dev \
+  postgresql-client \
+  wkhtmltopdf \
+  nano \
+  && pip install --upgrade pip \
+  && pip install pipenv \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy Pipfile and Pipfile.lock to the container
 COPY Pipfile Pipfile.lock ./
 
-# Install pipenv
-RUN pip install pipenv
-# Install dependencies
 RUN pipenv install --system --deploy --dev --verbose
 # Add to your Dockerfile
 RUN apt-get update && apt-get install -y postgresql-client
