@@ -4,14 +4,17 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-django = "==5.1.1"
+Django = "==5.1.4"
 celery = "==5.4.0"
 redis = "==5.1.1"
 flower = "==2.0.1"
 psycopg2-binary="==2.9.9"
 leek = "*"
+dj-database-url = "2.1.0"
+uWSGI = "2.0.28"
 
 [dev-packages]
 
 [requires]
 python_version = "3.12"
+
